@@ -63,57 +63,49 @@ app.post("/notify-approver", async (req, res) => {
       try {
         const userId = await lookupUserIdByEmail(email);
 
-        // Send branded DM
+        // Send DM
         await slackPost("chat.postMessage", {
-          channel: userId,
-          text: `🚨 Approval Needed: ${issueKey} - ${issueSummary}`,
-          attachments: [
+  channel: userId,
+  text: `🚨 IAM Approval Requested`, // fallback text
+  attachments: [
+    {
+      color: "#4D008C", 
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "🚨 IAM Approval Requested", emoji: true }
+        },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
+            { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
+            { type: "mrkdwn", text: `*Requester:*\n${requester}` },
+            { type: "mrkdwn", text: `*Approver:*\n<@${userId}>` }
+          ]
+        },
+        {
+          type: "actions",
+          elements: [
             {
-              color: "#4D008C", // primary company color
-              blocks: [
-                {
-                  type: "header",
-                  text: { type: "plain_text", text: "🚨 Approval Requested!", emoji: true }
-                },
-                {
-                  type: "section",
-                  fields: [
-                    { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
-                    { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
-                    { type: "mrkdwn", text: `*Requester:*\n${requester}` },
-                    { type: "mrkdwn", text: `*Approver:*\n<@${userId}>` }
-                  ]
-                },
-                {
-                  type: "actions",
-                  elements: [
-                    {
-                      type: "button",
-                      text: { type: "plain_text", text: "Open in Jira" },
-                      url: issueUrl,
-                      style: "primary"
-                    }
-                  ]
-                },
-                {
-                  type: "context",
-                  elements: [
-                    { type: "mrkdwn", text: "_This is an automated message from Jira_" }
-                  ]
-                }
-              ]
-            },
-            {
-              color: "#00BBB4", // secondary accent color
-              blocks: [
-                {
-                  type: "section",
-                  text: { type: "mrkdwn", text: "_Multi-approver notification active_" }
-                }
-              ]
+              type: "button",
+              text: { type: "plain_text", text: "Open in Jira" },
+              url: issueUrl,
+              style: "primary"
             }
           ]
-        });
+        },
+        {
+          type: "context",
+          elements: [
+            { type: "mrkdwn", text: "Please approve/reject in Jira by changing the status of the ticket. Replying here won’t approve it." }
+          ]
+        }
+      ]
+    }
+  ]
+});
+
 
         results.push({ email, ok: true });
       } catch (err) {
@@ -133,3 +125,4 @@ app.post("/notify-approver", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
