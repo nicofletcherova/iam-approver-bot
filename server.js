@@ -66,22 +66,23 @@ app.post("/notify-approver", async (req, res) => {
         // Send DM
         await slackPost("chat.postMessage", {
   channel: userId,
-  text: `🚨 IAM Approval Requested`, // fallback text
+  text: " ", // fallback text
   attachments: [
     {
       color: "#4D008C", 
       blocks: [
         {
           type: "header",
-          text: { type: "plain_text", text: "🚨 IAM Approval Requested", emoji: true }
+          text: { type: "plain_text", text: "🔵 IAM Approval Requested", emoji: true }
         },
         {
           type: "section",
           fields: [
             { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
             { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
+                { type: "mrkdwn", text: "\n" }, // empty field for spacing
             { type: "mrkdwn", text: `*Requester:*\n${requester}` },
-            { type: "mrkdwn", text: `*Approver:*\n<@${userId}>` }
+            { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` }
           ]
         },
         {
@@ -125,4 +126,5 @@ app.post("/notify-approver", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
 
