@@ -1,5 +1,5 @@
 import express from "express";
-import bodyParser from "body-parser"; // needed for Slack slash commands
+import bodyParser from "body-parser"; // for Slack actions
 import fetch from "node-fetch";
 
 const app = express();
@@ -7,11 +7,11 @@ app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // --- ENV VARS ---
-const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN; // xoxb-...
-const SHARED_SECRET = process.env.SHARED_SECRET;     // a long random string
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+const SHARED_SECRET = process.env.SHARED_SECRET;
 const RATE_LIMIT_MS = parseInt(process.env.RATE_LIMIT_MS || "200", 10);
-const JIRA_BASE_URL = process.env.JIRA_BASE_URL; // e.g., https://yourcompany.atlassian.net
-const JIRA_USER_EMAIL = process.env.JIRA_USER_EMAIL; // Jira API user email
+const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
+const JIRA_USER_EMAIL = process.env.JIRA_USER_EMAIL;
 const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN;
 
 if (!SLACK_BOT_TOKEN) {
@@ -36,45 +36,41 @@ async function slackPost(method, payload, query = "") {
 
 async function lookupUserIdByEmail(email) {
   const url = `https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` }
-  });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` } });
   const data = await res.json();
   if (!data.ok) throw new Error(`lookupByEmail(${email}) failed: ${data.error}`);
   return data.user.id;
 }
 
-// --- Jira query helper ---
-async function jiraGet(jql) {
-  const res = await fetch(`${JIRA_BASE_URL}/rest/api/3/search?jql=${encodeURIComponent(jql)}`, {
+async function jiraTransition(issueKey, transitionId) {
+  const url = `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/transitions`;
+  const body = { transition: { id: transitionId.toString() } };
+  const res = await fetch(url, {
+    method: "POST",
     headers: {
       "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
-      "Accept": "application/json"
-    }
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body)
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.errorMessages || "Jira query failed");
-  return data.issues || [];
+  if (!res.ok) throw new Error(`Jira transition failed for ${issueKey}`);
 }
 
-// --- security middleware for Jira webhook ---
+// --- security middleware ---
 app.use((req, res, next) => {
-  // allow slash commands and Slack actions
-  if (req.path.startsWith("/approval") || req.path.startsWith("/slack-actions")) return next();
-
+  if (req.path.startsWith("/slack-actions")) return next();
   const auth = (req.headers.authorization || "").trim();
   if (!SHARED_SECRET || auth === `Bearer ${SHARED_SECRET}`) return next();
   return res.status(401).json({ ok: false, error: "unauthorized" });
 });
 
-// --- main endpoint: DM approvers when ticket enters awaiting approval ---
+// --- main endpoint: DM approvers ---
 app.post("/notify-approver", async (req, res) => {
   try {
     const body = req.body || {};
     let emails = body.approverEmails || [];
     if (!Array.isArray(emails)) emails = [emails].filter(Boolean);
-
-    if (emails.length === 0) return res.status(400).json({ ok: false, error: "no approverEmails provided" });
+    if (!emails.length) return res.status(400).json({ ok: false, error: "no approverEmails provided" });
 
     const { issueKey, issueSummary, issueUrl, requester } = body;
     const results = [];
@@ -85,42 +81,31 @@ app.post("/notify-approver", async (req, res) => {
 
         await slackPost("chat.postMessage", {
           channel: userId,
-          text: " ", // fallback
-          attachments: [
+          text: `Approval requested: ${issueKey} — ${issueSummary}`,
+          blocks: [
+            { type: "header", text: { type: "plain_text", text: "🔵 IAM Approval Requested", emoji: true } },
             {
-              color: "#4D008C",
-              blocks: [
-                {
-                  type: "header",
-                  text: { type: "plain_text", text: "🔵 IAM Approval Requested", emoji: true }
-                },
-                {
-                  type: "section",
-                  fields: [
-                    { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
-                    { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
-                    { type: "mrkdwn", text: "\n" },
-                    { type: "mrkdwn", text: `*Requester:*\n${requester}` },
-                    { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` }
-                  ]
-                },
-                {
-                  type: "actions",
-                  elements: [
-                    {
-                      type: "button",
-                      text: { type: "plain_text", text: "Open in Jira" },
-                      url: issueUrl,
-                      style: "primary"
-                    }
-                  ]
-                },
-                {
-                  type: "context",
-                  elements: [
-                    { type: "mrkdwn", text: "Please approve/reject in Jira. Replying here won’t approve it." }
-                  ]
-                }
+              type: "section",
+              fields: [
+                { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
+                { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
+                { type: "mrkdwn", text: "\n" },
+                { type: "mrkdwn", text: `*Requester:*\n${requester}` },
+                { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` }
+              ]
+            },
+            {
+              type: "actions",
+              elements: [
+                { type: "button", text: { type: "plain_text", text: "✅ Approve" }, style: "primary", value: JSON.stringify({ issueKey, transitionId: 61 }) },
+                { type: "button", text: { type: "plain_text", text: "❌ Reject" }, style: "danger", value: JSON.stringify({ issueKey, transitionId: 51 }) },
+                { type: "button", text: { type: "plain_text", text: "Open in Jira" }, url: issueUrl, style: "primary" }
+              ]
+            },
+            {
+              type: "context",
+              elements: [
+                { type: "mrkdwn", text: "Please approve/reject in Jira by clicking above. Replying here won’t approve it." }
               ]
             }
           ]
@@ -141,64 +126,27 @@ app.post("/notify-approver", async (req, res) => {
   }
 });
 
-// --- Slash command /approval ---
-app.post("/approval", async (req, res) => {
+// --- endpoint to handle Slack button clicks ---
+app.post("/slack-actions", async (req, res) => {
   try {
-    const slackUserId = req.body.user_id; // from the slash command
+    const payload = JSON.parse(req.body.payload);
+    const { issueKey, transitionId } = JSON.parse(payload.actions[0].value);
 
-    // For now, query Jira for tickets awaiting this user's email
-    // Here we need the email corresponding to this Slack user
-    // If you already have a mapping or Jira stores the approver's email:
-    const userEmail = process.env.JIRA_USER_EMAIL_MAPPING[slackUserId]; // example mapping object
+    await jiraTransition(issueKey, transitionId);
 
-    if (!userEmail) {
-      return res.json({
-        response_type: "ephemeral",
-        text: "⚠️ Cannot find your Jira email. Please contact your admin."
-      });
-    }
-
-    // Query Jira for tickets where this email is in the Approver field
-    const jql = `"Approver" = "${userEmail}" AND status = "Awaiting Approval" ORDER BY created DESC`;
-    const issues = await jiraGet(jql); // reuse your Jira helper function
-
-    if (!issues.length) {
-      return res.json({
-        response_type: "ephemeral",
-        text: "✅ You have no tickets awaiting your approval."
-      });
-    }
-
-    // Build blocks with Approve/Reject buttons
-    const blocks = issues.flatMap(issue => {
-      const key = issue.key;
-      const summary = issue.fields.summary;
-      const url = `${JIRA_BASE_URL}/browse/${key}`;
-      return [
-        {
-          type: "section",
-          text: { type: "mrkdwn", text: `*<${url}|${key}>* — ${summary}` }
-        },
-        {
-          type: "actions",
-          elements: [
-            { type: "button", text: { type: "plain_text", text: "✅ Approve" }, style: "primary", value: JSON.stringify({ key, transitionId: 61 }) },
-            { type: "button", text: { type: "plain_text", text: "❌ Reject" }, style: "danger", value: JSON.stringify({ key, transitionId: 51 }) }
-          ]
-        },
-        { type: "divider" }
-      ];
+    await slackPost("chat.update", {
+      channel: payload.channel.id,
+      ts: payload.message.ts,
+      text: `Ticket ${issueKey} has been ${transitionId === 61 ? "✅ Approved" : "❌ Rejected"}`,
+      blocks: []
     });
 
-    return res.json({ response_type: "ephemeral", blocks });
-
+    res.send(""); // quick 200 response to Slack
   } catch (err) {
-    console.error("Error in /approval:", err);
-    return res.json({ response_type: "ephemeral", text: `⚠️ Something went wrong: ${err.message}` });
+    console.error("Error handling Slack action:", err);
+    res.status(500).send("Error processing action");
   }
 });
 
-
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
-
