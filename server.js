@@ -1,4 +1,5 @@
 import express from "express";
+import bodyParser from "body-parser"; // needed for Slack slash commands
 
 const app = express();
 app.use(express.json());
@@ -38,14 +39,17 @@ async function lookupUserIdByEmail(email) {
   return data.user.id;
 }
 
-// --- security middleware ---
+// --- security middleware for Jira webhook ---
 app.use((req, res, next) => {
+  // allow slash commands (they don’t use Bearer secret)
+  if (req.path.startsWith("/approval")) return next();
+
   const auth = (req.headers.authorization || "").trim();
   if (!SHARED_SECRET || auth === `Bearer ${SHARED_SECRET}`) return next();
   return res.status(401).json({ ok: false, error: "unauthorized" });
 });
 
-// --- main endpoint ---
+// --- main endpoint: DM approvers when ticket enters awaiting approval ---
 app.post("/notify-approver", async (req, res) => {
   try {
     const body = req.body || {};
@@ -65,55 +69,53 @@ app.post("/notify-approver", async (req, res) => {
 
         // Send DM
         await slackPost("chat.postMessage", {
-  channel: userId,
-  text: " ", // fallback text
-  attachments: [
-    {
-      color: "#4D008C", 
-      blocks: [
-        {
-          type: "header",
-          text: { type: "plain_text", text: "🔵 IAM Approval Requested", emoji: true }
-        },
-        {
-          type: "section",
-          fields: [
-            { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
-            { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
-                { type: "mrkdwn", text: "\n" }, // empty field for spacing
-            { type: "mrkdwn", text: `*Requester:*\n${requester}` },
-            { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` }
-          ]
-        },
-        {
-          type: "actions",
-          elements: [
+          channel: userId,
+          text: " ", // fallback
+          attachments: [
             {
-              type: "button",
-              text: { type: "plain_text", text: "Open in Jira" },
-              url: issueUrl,
-              style: "primary"
+              color: "#4D008C",
+              blocks: [
+                {
+                  type: "header",
+                  text: { type: "plain_text", text: "🔵 IAM Approval Requested", emoji: true }
+                },
+                {
+                  type: "section",
+                  fields: [
+                    { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
+                    { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
+                    { type: "mrkdwn", text: "\n" },
+                    { type: "mrkdwn", text: `*Requester:*\n${requester}` },
+                    { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` }
+                  ]
+                },
+                {
+                  type: "actions",
+                  elements: [
+                    {
+                      type: "button",
+                      text: { type: "plain_text", text: "Open in Jira" },
+                      url: issueUrl,
+                      style: "primary"
+                    }
+                  ]
+                },
+                {
+                  type: "context",
+                  elements: [
+                    { type: "mrkdwn", text: "Please approve/reject in Jira. Replying here won’t approve it." }
+                  ]
+                }
+              ]
             }
           ]
-        },
-        {
-          type: "context",
-          elements: [
-            { type: "mrkdwn", text: "Please approve/reject in Jira by changing the status of the ticket. Replying here won’t approve it." }
-          ]
-        }
-      ]
-    }
-  ]
-});
-
+        });
 
         results.push({ email, ok: true });
       } catch (err) {
         results.push({ email, ok: false, error: err.message });
       }
 
-      // rate limit pause
       await new Promise(r => setTimeout(r, RATE_LIMIT_MS));
     }
 
@@ -124,7 +126,38 @@ app.post("/notify-approver", async (req, res) => {
   }
 });
 
+// --- NEW: Slash command /approval ---
+app.use(bodyParser.urlencoded({ extended: true }));
+
+app.post("/approval", async (req, res) => {
+  const userId = req.body.user_id;
+
+  // For now: static fake tickets (replace later with Jira API call)
+  const tickets = [
+    { key: "IAM-123", summary: "VPN Access Request", url: "https://jira.example.com/browse/IAM-123" },
+    { key: "IAM-456", summary: "AWS Console Access", url: "https://jira.example.com/browse/IAM-456" }
+  ];
+
+  const blocks = tickets.flatMap(t => [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `*<${t.url}|${t.key}>* — ${t.summary}` }
+    },
+    {
+      type: "actions",
+      elements: [
+        { type: "button", text: { type: "plain_text", text: "✅ Approve" }, style: "primary", value: JSON.stringify({ issueKey: t.key, action: "approve" }) },
+        { type: "button", text: { type: "plain_text", text: "❌ Reject" }, style: "danger", value: JSON.stringify({ issueKey: t.key, action: "reject" }) }
+      ]
+    },
+    { type: "divider" }
+  ]);
+
+  res.json({
+    response_type: "ephemeral", // only visible to requester
+    blocks
+  });
+});
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
-
-
