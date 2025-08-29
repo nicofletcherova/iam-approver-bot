@@ -144,15 +144,23 @@ app.post("/notify-approver", async (req, res) => {
 // --- Slash command /approval ---
 app.post("/approval", async (req, res) => {
   try {
-    const slackUserId = req.body.user_id;
+    const slackUserId = req.body.user_id; // from the slash command
 
-    // lookup Slack user's email
-    const userInfo = await slackPost("users.info", { user: slackUserId });
-    const email = userInfo.user.profile.email;
+    // For now, query Jira for tickets awaiting this user's email
+    // Here we need the email corresponding to this Slack user
+    // If you already have a mapping or Jira stores the approver's email:
+    const userEmail = process.env.JIRA_USER_EMAIL_MAPPING[slackUserId]; // example mapping object
 
-    // query Jira for tickets awaiting this user's approval
-    const jql = `"Approver" = "${email}" AND status = "Awaiting Approval" ORDER BY created DESC`;
-    const issues = await jiraGet(jql);
+    if (!userEmail) {
+      return res.json({
+        response_type: "ephemeral",
+        text: "⚠️ Cannot find your Jira email. Please contact your admin."
+      });
+    }
+
+    // Query Jira for tickets where this email is in the Approver field
+    const jql = `"Approver" = "${userEmail}" AND status = "Awaiting Approval" ORDER BY created DESC`;
+    const issues = await jiraGet(jql); // reuse your Jira helper function
 
     if (!issues.length) {
       return res.json({
@@ -161,6 +169,7 @@ app.post("/approval", async (req, res) => {
       });
     }
 
+    // Build blocks with Approve/Reject buttons
     const blocks = issues.flatMap(issue => {
       const key = issue.key;
       const summary = issue.fields.summary;
@@ -182,51 +191,14 @@ app.post("/approval", async (req, res) => {
     });
 
     return res.json({ response_type: "ephemeral", blocks });
+
   } catch (err) {
     console.error("Error in /approval:", err);
     return res.json({ response_type: "ephemeral", text: `⚠️ Something went wrong: ${err.message}` });
   }
 });
 
-// --- Slack interactive actions handler ---
-app.post("/slack-actions", bodyParser.urlencoded({ extended: true }), async (req, res) => {
-  try {
-    const payload = JSON.parse(req.body.payload);
-    const action = JSON.parse(payload.actions[0].value); // { key, transitionId }
-    const issueKey = action.key;
-    const transitionId = action.transitionId;
-
-    // call Jira transition API
-    const jiraRes = await fetch(`${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/transitions`, {
-      method: "POST",
-      headers: {
-        "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ transition: { id: transitionId } })
-    });
-
-    if (!jiraRes.ok) {
-      const errData = await jiraRes.json();
-      throw new Error(errData.errorMessages || "Jira transition failed");
-    }
-
-    // update Slack message to confirm action
-    await fetch(payload.response_url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        replace_original: true,
-        text: `✅ Issue *${issueKey}* has been transitioned successfully.`
-      })
-    });
-
-    res.send(""); // acknowledge Slack
-  } catch (err) {
-    console.error("Slack action error:", err);
-    res.send(""); // still acknowledge
-  }
-});
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
