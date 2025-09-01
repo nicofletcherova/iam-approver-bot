@@ -25,7 +25,7 @@ async function slackPost(method, payload, query = "") {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
-      "Content-Type": "application/json; charset=utf-8`
+      "Content-Type": "application/json; charset=utf-8"
     },
     body: JSON.stringify(payload)
   });
@@ -91,6 +91,7 @@ app.use((req, res, next) => {
   if (!SHARED_SECRET || auth === `Bearer ${SHARED_SECRET}`) return next();
   return res.status(401).json({ ok: false, error: "unauthorized" });
 });
+
 // --- main endpoint: DM approvers ---
 app.post("/notify-approver", async (req, res) => {
   try {
@@ -167,7 +168,11 @@ app.post("/slack-actions", async (req, res) => {
 
     // fetch Slack user info for name
     const slackUserInfo = await slackPost("users.info", { user: payload.user.id });
-    const approverName = slackUserInfo.user?.profile?.real_name || slackUserInfo.user?.profile?.display_name || slackUserInfo.user?.name || payload.user.id;
+    const approverName =
+      slackUserInfo.user?.profile?.real_name ||
+      slackUserInfo.user?.profile?.display_name ||
+      slackUserInfo.user?.name ||
+      payload.user.id;
 
     const decision = transitionId === 61 ? "✅ Approved" : "❌ Rejected";
     await jiraAddComment(issueKey, `${decision} by ${approverName} (via IAM Approver Slack bot)`);
@@ -195,3 +200,5 @@ app.post("/slack-actions", async (req, res) => {
   }
 });
 
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Listening on :${port}`));
