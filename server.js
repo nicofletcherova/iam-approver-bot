@@ -141,7 +141,7 @@ app.post("/notify-approver", async (req, res) => {
           channel: userId,
           text: `Approval requested: ${issueKey} — ${issueSummary}`,
           blocks: [
-            { type: "header", text: { type: "plain_text", text: "🔵 IAM Approval Requested", emoji: true } },
+            { type: "header", text: { type: "plain_text", text: "🟢 IAM Approval Requested", emoji: true } },
             {
               type: "section",
               fields: [
@@ -248,5 +248,6 @@ app.post("/slack-actions", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
 
 
