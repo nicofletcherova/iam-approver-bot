@@ -1,3 +1,96 @@
+import express from "express";
+import bodyParser from "body-parser"; // for Slack actions
+import fetch from "node-fetch";
+
+const app = express();
+app.use(express.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// --- ENV VARS ---
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+const SHARED_SECRET = process.env.SHARED_SECRET;
+const RATE_LIMIT_MS = parseInt(process.env.RATE_LIMIT_MS || "200", 10);
+const JIRA_BASE_URL = process.env.JIRA_BASE_URL;
+const JIRA_USER_EMAIL = process.env.JIRA_USER_EMAIL;
+const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN;
+
+if (!SLACK_BOT_TOKEN) {
+  console.error("Missing SLACK_BOT_TOKEN env var. Exiting.");
+  process.exit(1);
+}
+
+// --- helper functions ---
+async function slackPost(method, payload, query = "") {
+  const res = await fetch(`https://slack.com/api/${method}${query}`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
+      "Content-Type": "application/json; charset=utf-8`
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(`${method} failed: ${data.error}`);
+  return data;
+}
+
+async function lookupUserIdByEmail(email) {
+  const url = `https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(email)}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` } });
+  const data = await res.json();
+  if (!data.ok) throw new Error(`lookupByEmail(${email}) failed: ${data.error}`);
+  return data.user.id;
+}
+
+async function jiraTransition(issueKey, transitionId) {
+  const url = `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/transitions`;
+  const body = { transition: { id: transitionId.toString() } };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`Jira transition failed for ${issueKey}`);
+}
+
+async function jiraAddComment(issueKey, comment) {
+  const url = `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/comment`;
+  const body = {
+    body: {
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: comment }]
+        }
+      ]
+    }
+  };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to add comment to ${issueKey}: ${errText}`);
+  }
+}
+
+// --- security middleware ---
+app.use((req, res, next) => {
+  if (req.path.startsWith("/slack-actions")) return next();
+  const auth = (req.headers.authorization || "").trim();
+  if (!SHARED_SECRET || auth === `Bearer ${SHARED_SECRET}`) return next();
+  return res.status(401).json({ ok: false, error: "unauthorized" });
+});
 // --- main endpoint: DM approvers ---
 app.post("/notify-approver", async (req, res) => {
   try {
@@ -101,3 +194,4 @@ app.post("/slack-actions", async (req, res) => {
     res.status(500).send("Error processing action");
   }
 });
+
