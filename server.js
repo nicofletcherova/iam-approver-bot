@@ -25,7 +25,7 @@ async function slackPost(method, payload, query = "") {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
-      "Content-Type": "application/json; charset=utf-8`
+      "Content-Type": "application/json; charset=utf-8"
     },
     body: JSON.stringify(payload)
   });
@@ -196,3 +196,4 @@ app.post("/slack-actions", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
