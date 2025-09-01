@@ -152,20 +152,35 @@ app.post("/notify-approver", async (req, res) => {
               ]
             },
             {
-              type: "actions",
-              elements: [
-                { type: "button", text: { type: "plain_text", text: "✅ Approve" }, style: "primary", value: JSON.stringify({ issueKey, transitionId: 61 }) },
-                { type: "button", text: { type: "plain_text", text: "❌ Reject" }, style: "danger", value: JSON.stringify({ issueKey, transitionId: 51 }) },
-                { type: "button", text: { type: "plain_text", text: "Open in Jira" }, url: issueUrl, style: "primary" }
-              ]
+          type: "actions",
+          elements: [
+            { 
+              type: "button", 
+              text: { type: "plain_text", text: "✅ Approve" }, 
+              style: "primary", 
+              value: JSON.stringify({ issueKey, transitionId: 61, issueUrl }) 
             },
-            {
-              type: "context",
-              elements: [
-                { type: "mrkdwn", text: "Please approve or reject using the buttons above. Replying in Slack will not take any action. If you need more details, please request them in the Jira ticket comments. Thank you!" }
-              ]
+            { 
+              type: "button", 
+              text: { type: "plain_text", text: "❌ Reject" }, 
+              style: "danger", 
+              value: JSON.stringify({ issueKey, transitionId: 51, issueUrl }) 
+            },
+            { 
+              type: "button", 
+              text: { type: "plain_text", text: "Open in Jira" }, 
+              url: issueUrl, 
+              style: "primary" 
             }
-          ]
+                        ]
+                      },
+                      {
+                        type: "context",
+                        elements: [
+                          { type: "mrkdwn", text: "Please approve or reject using the buttons above. Replying in Slack will not take any action. If you need more details, please request them in the Jira ticket comments. Thank you!" }
+                        ]
+                      }
+                    ]
         });
 
         results.push({ email, ok: true });
@@ -188,7 +203,7 @@ app.post("/slack-actions", async (req, res) => {
   try {
     const payload = JSON.parse(req.body.payload);
     const action = payload.actions[0];
-    const { issueKey, transitionId } = JSON.parse(action.value);
+    const { issueKey, transitionId, issueUrl } = JSON.parse(action.value);
 
     // transition in Jira
     await jiraTransition(issueKey, transitionId);
@@ -233,4 +248,5 @@ app.post("/slack-actions", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
 
