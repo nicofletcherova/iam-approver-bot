@@ -126,6 +126,7 @@ app.post("/notify-approver", async (req, res) => {
 
     // Fetch Jira issue details to get subsystems
     const issueData = await jiraGetIssue(issueKey);
+    const issueDescription = issueData.fields?.description?.content?.map(block => block.content.map(c => c.text).join("")).join("\n") || "—";
     const subsystems = issueData.fields?.customfield_10067 || [];
     const subsystemsText = Array.isArray(subsystems)
       ? subsystems.map(s => s.value || s).join(", ")
@@ -147,7 +148,7 @@ app.post("/notify-approver", async (req, res) => {
               fields: [
                 { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
                 { type: "mrkdwn", text: `*Requested by:*\n${requester}` },
-                { type: "mrkdwn", text: `*Business Justification:*\n${issueSummary}` },
+                { type: "mrkdwn", text: `*Business Justification:*\n${issueDescription}` },
                 { type: "mrkdwn", text: `*Requested Access:*\n${subsystemsText}` }
               ]
             },
@@ -248,6 +249,7 @@ app.post("/slack-actions", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
 
 
 
