@@ -25,7 +25,7 @@ async function slackPost(method, payload, query = "") {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
-      "Content-Type": "application/json; charset=utf-8"
+      "Content-Type": "application/json; charset=utf-8`
     },
     body: JSON.stringify(payload)
   });
@@ -58,7 +58,18 @@ async function jiraTransition(issueKey, transitionId) {
 
 async function jiraAddComment(issueKey, comment) {
   const url = `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/comment`;
-  const body = { body: comment };
+  const body = {
+    body: {
+      type: "doc",
+      version: 1,
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: comment }]
+        }
+      ]
+    }
+  };
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -67,7 +78,10 @@ async function jiraAddComment(issueKey, comment) {
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Failed to add comment to ${issueKey}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to add comment to ${issueKey}: ${errText}`);
+  }
 }
 
 // --- security middleware ---
@@ -102,7 +116,7 @@ app.post("/notify-approver", async (req, res) => {
               type: "section",
               fields: [
                 { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
-                 { type: "mrkdwn", text: `*Requester:*\n${requester}` },
+                { type: "mrkdwn", text: `*Requester:*\n${requester}` },
                 { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
                 { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` }
               ]
@@ -150,16 +164,27 @@ app.post("/slack-actions", async (req, res) => {
     await jiraTransition(issueKey, transitionId);
 
     // add comment in Jira (logs the approver’s Slack identity)
-    const slackUser = payload.user?.username || payload.user?.name || `<@${payload.user?.id}>`;
+    const slackUser = `<@${payload.user?.id}>`;
     const decision = transitionId === 61 ? "✅ Approved" : "❌ Rejected";
     await jiraAddComment(issueKey, `${decision} by ${slackUser} (via IAM Approver Slack bot)`);
 
-    // update Slack message
+    // pick correct ts (message.ts OR container.message_ts)
+    const ts = payload.message?.ts || payload.container?.message_ts;
+
+    // update Slack message (remove buttons)
     await slackPost("chat.update", {
       channel: payload.channel.id,
-      ts: payload.message.ts,
+      ts,
       text: `Ticket ${issueKey} has been ${decision}`,
-      blocks: []
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*${issueKey}* has been ${decision} by <@${payload.user.id}>`
+          }
+        }
+      ]
     });
 
     res.send(""); // quick ack
