@@ -56,6 +56,20 @@ async function jiraTransition(issueKey, transitionId) {
   if (!res.ok) throw new Error(`Jira transition failed for ${issueKey}`);
 }
 
+async function jiraAddComment(issueKey, comment) {
+  const url = `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}/comment`;
+  const body = { body: comment };
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to add comment to ${issueKey}`);
+}
+
 // --- security middleware ---
 app.use((req, res, next) => {
   if (req.path.startsWith("/slack-actions")) return next();
@@ -88,9 +102,8 @@ app.post("/notify-approver", async (req, res) => {
               type: "section",
               fields: [
                 { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
+                 { type: "mrkdwn", text: `*Requester:*\n${requester}` },
                 { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
-                { type: "mrkdwn", text: "\n" },
-                { type: "mrkdwn", text: `*Requester:*\n${requester}` },
                 { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` }
               ]
             },
@@ -130,18 +143,26 @@ app.post("/notify-approver", async (req, res) => {
 app.post("/slack-actions", async (req, res) => {
   try {
     const payload = JSON.parse(req.body.payload);
-    const { issueKey, transitionId } = JSON.parse(payload.actions[0].value);
+    const action = payload.actions[0];
+    const { issueKey, transitionId } = JSON.parse(action.value);
 
+    // transition in Jira
     await jiraTransition(issueKey, transitionId);
 
+    // add comment in Jira (logs the approver’s Slack identity)
+    const slackUser = payload.user?.username || payload.user?.name || `<@${payload.user?.id}>`;
+    const decision = transitionId === 61 ? "✅ Approved" : "❌ Rejected";
+    await jiraAddComment(issueKey, `${decision} by ${slackUser} (via IAM Approver Slack bot)`);
+
+    // update Slack message
     await slackPost("chat.update", {
       channel: payload.channel.id,
       ts: payload.message.ts,
-      text: `Ticket ${issueKey} has been ${transitionId === 61 ? "✅ Approved" : "❌ Rejected"}`,
+      text: `Ticket ${issueKey} has been ${decision}`,
       blocks: []
     });
 
-    res.send(""); // quick 200 response to Slack
+    res.send(""); // quick ack
   } catch (err) {
     console.error("Error handling Slack action:", err);
     res.status(500).send("Error processing action");
