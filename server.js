@@ -146,10 +146,9 @@ app.post("/notify-approver", async (req, res) => {
               type: "section",
               fields: [
                 { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
-                { type: "mrkdwn", text: `*Requester:*\n${requester}` },
-                { type: "mrkdwn", text: `*Summary:*\n${issueSummary}` },
-                { type: "mrkdwn", text: `*Approvers:*\n<@${userId}>` },
-                { type: "mrkdwn", text: `*Subsystems:*\n${subsystemsText}` }
+                { type: "mrkdwn", text: `*Requested by:*\n${requester}` },
+                { type: "mrkdwn", text: `*Business Justification:*\n${issueSummary}` },
+                { type: "mrkdwn", text: `*Requested Access:*\n${subsystemsText}` }
               ]
             },
             {
@@ -163,7 +162,7 @@ app.post("/notify-approver", async (req, res) => {
             {
               type: "context",
               elements: [
-                { type: "mrkdwn", text: "Please approve/reject in Jira by clicking above. Replying here won’t approve it." }
+                { type: "mrkdwn", text: "Please approve or reject using the buttons above. Replying in Slack will not take any action. If you need more details, please request them in the Jira ticket comments. Thank you!" }
               ]
             }
           ]
@@ -197,14 +196,14 @@ app.post("/slack-actions", async (req, res) => {
     // fetch Slack user info
     const slackUserInfo = await slackGet("users.info", `?user=${payload.user.id}`);
     const approverName =
-      slackUserInfo.user?.profile?.display_name ||
       slackUserInfo.user?.profile?.real_name ||
+      slackUserInfo.user?.profile?.display_name ||
       slackUserInfo.user?.profile?.email ||
       payload.user.id;
 
     // add comment in Jira (with proper name, not Slack ID)
     const decision = transitionId === 61 ? "✅ Approved" : "❌ Rejected";
-    await jiraAddComment(issueKey, `${decision} by ${approverName} (via IAM Approver Slack bot)`);
+    await jiraAddComment(issueKey, `Ticket has been ${decision} by ${approverName}. Action done and comment added automatically via the IAM Approver Slack bot. `);
 
     // pick correct ts (message.ts OR container.message_ts)
     const ts = payload.message?.ts || payload.container?.message_ts;
@@ -213,13 +212,13 @@ app.post("/slack-actions", async (req, res) => {
     await slackPost("chat.update", {
       channel: payload.channel.id,
       ts,
-      text: `Ticket ${issueKey} has been ${decision}`,
+      text: `Ticket ${issueKey} has been ${decision}. Thank you!`,
       blocks: [
         {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `*${issueKey}* has been ${decision} by ${approverName}`
+            text: `Ticket *<${issueUrl}|${issueKey}>* has been ${decision}. Thank you!`
           }
         }
       ]
@@ -234,3 +233,4 @@ app.post("/slack-actions", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Listening on :${port}`));
+
