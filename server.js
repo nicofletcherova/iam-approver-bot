@@ -25,7 +25,7 @@ async function slackPost(method, payload, query = "") {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${SLACK_BOT_TOKEN}`,
-      "Content-Type": "application/json; charset=utf-8`,
+      "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(payload),
   });
@@ -52,8 +52,7 @@ async function jiraGetIssue(issueKey) {
   const url = `${JIRA_BASE_URL}/rest/api/3/issue/${issueKey}`;
   const res = await fetch(url, {
     headers: {
-      "Authorization":
-        "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
+      "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
       "Accept": "application/json",
     },
   });
@@ -67,8 +66,7 @@ async function jiraTransition(issueKey, transitionId) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      "Authorization":
-        "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
+      "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -82,16 +80,13 @@ async function jiraAddComment(issueKey, comment) {
     body: {
       type: "doc",
       version: 1,
-      content: [
-        { type: "paragraph", content: [{ type: "text", text: comment }] },
-      ],
+      content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
     },
   };
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      "Authorization":
-        "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
+      "Authorization": "Basic " + Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString("base64"),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -114,35 +109,18 @@ app.use((req, res, next) => {
 app.post("/notify-approver", async (req, res) => {
   try {
     const body = req.body || {};
-
-    // Expect approverEmails as full JSON (from Jira Automation using toJson)
-    let emails = [];
-    if (Array.isArray(body.approverEmails)) {
-      emails = body.approverEmails.map((a) =>
-        typeof a === "string" ? a : a.emailAddress
-      ).filter(Boolean);
-    } else if (typeof body.approverEmails === "string") {
-      emails = [body.approverEmails];
-    }
-
-    if (!emails.length) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "no approverEmails provided" });
-    }
+    let emails = body.approverEmails || [];
+    if (!Array.isArray(emails)) emails = [emails].filter(Boolean);
+    if (!emails.length) return res.status(400).json({ ok: false, error: "no approverEmails provided" });
 
     const { issueKey, issueUrl, requester } = body;
 
     const issueData = await jiraGetIssue(issueKey);
     const issueDescription =
-      issueData.fields?.description?.content
-        ?.map((block) =>
-          block.content.map((c) => c.text).join("")
-        )
-        .join("\n") || "—";
+      issueData.fields?.description?.content?.map(block => block.content.map(c => c.text).join("")).join("\n") || "—";
     const subsystems = issueData.fields?.customfield_10067 || [];
     const subsystemsText = Array.isArray(subsystems)
-      ? subsystems.map((s) => s.value || s).join(", ")
+      ? subsystems.map(s => s.value || s).join(", ")
       : subsystems?.value || "—";
 
     const results = [];
@@ -155,30 +133,14 @@ app.post("/notify-approver", async (req, res) => {
           channel: userId,
           text: `Approval requested: ${issueKey}`,
           blocks: [
-            {
-              type: "header",
-              text: {
-                type: "plain_text",
-                text: "🟢 IAM Approval Requested",
-                emoji: true,
-              },
-            },
+            { type: "header", text: { type: "plain_text", text: "🟢 IAM Approval Requested", emoji: true } },
             {
               type: "section",
               fields: [
-                {
-                  type: "mrkdwn",
-                  text: `*Ticket:*\n<${issueUrl}|${issueKey}>`,
-                },
+                { type: "mrkdwn", text: `*Ticket:*\n<${issueUrl}|${issueKey}>` },
                 { type: "mrkdwn", text: `*Requested by:*\n${requester}` },
-                {
-                  type: "mrkdwn",
-                  text: `*Business Justification:*\n${issueDescription}`,
-                },
-                {
-                  type: "mrkdwn",
-                  text: `*Requested Access:*\n${subsystemsText}`,
-                },
+                { type: "mrkdwn", text: `*Business Justification:*\n${issueDescription}` },
+                { type: "mrkdwn", text: `*Requested Access:*\n${subsystemsText}` },
               ],
             },
             {
@@ -188,28 +150,15 @@ app.post("/notify-approver", async (req, res) => {
                   type: "button",
                   text: { type: "plain_text", text: "✅ Approve" },
                   style: "primary",
-                  value: JSON.stringify({
-                    issueKey,
-                    transitionId: 61,
-                    issueUrl,
-                  }),
+                  value: JSON.stringify({ issueKey, transitionId: 61, issueUrl }),
                 },
                 {
                   type: "button",
                   text: { type: "plain_text", text: "❌ Reject" },
                   style: "danger",
-                  value: JSON.stringify({
-                    issueKey,
-                    transitionId: 51,
-                    issueUrl,
-                  }),
+                  value: JSON.stringify({ issueKey, transitionId: 51, issueUrl }),
                 },
-                {
-                  type: "button",
-                  text: { type: "plain_text", text: "Open in Jira" },
-                  url: issueUrl,
-                  style: "primary",
-                },
+                { type: "button", text: { type: "plain_text", text: "Open in Jira" }, url: issueUrl, style: "primary" },
               ],
             },
             {
@@ -229,7 +178,7 @@ app.post("/notify-approver", async (req, res) => {
         results.push({ email, ok: false, error: err.message });
       }
 
-      await new Promise((r) => setTimeout(r, RATE_LIMIT_MS));
+      await new Promise(r => setTimeout(r, RATE_LIMIT_MS));
     }
 
     return res.json({ ok: true, results });
@@ -293,10 +242,7 @@ app.post("/slack-actions", async (req, res) => {
         blocks: [
           {
             type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `Ticket *<${issueUrl}|${issueKey}>* has been ${decision}. Thank you!`,
-            },
+            text: { type: "mrkdwn", text: `Ticket *<${issueUrl}|${issueKey}>* has been ${decision}. Thank you!` },
           },
         ],
       });
